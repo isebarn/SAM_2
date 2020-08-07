@@ -2,6 +2,7 @@ import scrapy
 import pymongo
 from pprint import pprint
 import re
+import os
 
 levels = ['root', 'level_1', 'level_2', 'level_3']
 
@@ -66,7 +67,7 @@ def filter_conditions(item, parent_url):
   return None
 
 def client():
-  return pymongo.MongoClient('mongodb://root:example@192.168.1.35:27017/')
+  return pymongo.MongoClient(os.environ.get('DATABASE'))
 
 def get_mongo_collection(collection_name):
   database = client()["SAM2"]
