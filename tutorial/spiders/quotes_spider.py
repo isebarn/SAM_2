@@ -124,7 +124,7 @@ def parser(response):
   return result
 
 def read_sites_file():
-    with open('../../sites.txt') as f:
+    with open('sites.txt') as f:
         start_urls = [url.strip() for url in f.readlines()]
 
     return start_urls
