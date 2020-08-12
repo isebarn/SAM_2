@@ -1,0 +1,19 @@
+{
+  "folders":
+  [
+    {
+      "path": "."
+    }
+  ],
+  "settings":
+  {
+    "project_environment":
+    {
+      "env":
+      {
+        "DATABASE": "mongodb://root:example@192.168.1.35:27017/",
+      }
+    }
+  },
+  "virtualenv": "/home/david/SAM/venv"
+}

@@ -1,8 +1,11 @@
 import scrapy
 import pymongo
+from bson.objectid import ObjectId
 from pprint import pprint
 import re
 import os
+from time import time
+from scrapy import signals
 
 levels = ['root', 'level_1', 'level_2', 'level_3']
 
@@ -30,6 +33,9 @@ def item_is_empty(item):
 def item_is_pdf_link(item):
   return item.endswith('.pdf')
 
+def item_is_email_link(item):
+  return 'mailto' in item
+
 # item_is_subdirectory(/p/monday) return true
 def item_is_subdirectory(item):
   return item.startswith('/')
@@ -45,7 +51,7 @@ def starts_with_subdomain(url, parent_url):
   return subdomain != None and subdomain.group(1) != None
 
 def filter_conditions(item, parent_url):
-  if item_is_empty(item) or item_is_pdf_link(item):
+  if item_is_empty(item) or item_is_pdf_link(item) or item_is_email_link(item):
     return None
 
   # Check if the parent_url appears in the item
@@ -63,17 +69,8 @@ def filter_conditions(item, parent_url):
   # check if item is a subdirectory link
   if item_is_subdirectory(item):
     return "{}{}".format(parent_url, item)
-
   return None
 
-def client():
-  return pymongo.MongoClient(os.environ.get('DATABASE'))
-
-def get_mongo_collection(collection_name):
-  database = client()["SAM2"]
-  collection = database[collection_name]
-
-  return collection
 
 def save_single(data, collection_name):
   collection = get_mongo_collection(collection_name)
@@ -84,6 +81,12 @@ def save_single(data, collection_name):
 def save_many(data, collection_name):
   collection = get_mongo_collection(collection_name)
   collection_idx = levels.index(collection_name)
+
+  pages = []
+
+  for page in data:
+    page['subpages'] = list(set(page['subpages']) - set(pages))
+    pages += page['subpages']
 
   collection.insert_many(data)
 
@@ -105,7 +108,7 @@ def query_links(url, collection_name):
 
 def parser(response):
   url = response.request.url
-  html_links = response.xpath("//a[@href]")
+  html_links = response.xpath("//div/a[@href]")
   links = [link.xpath('@href').extract_first() for link in html_links]
   links = list(set(links))
   links = [filter_conditions(link, url) for link in links]
@@ -121,7 +124,7 @@ def parser(response):
   return result
 
 def read_sites_file():
-    with open('sites.txt') as f:
+    with open('../../sites.txt') as f:
         start_urls = [url.strip() for url in f.readlines()]
 
     return start_urls
@@ -134,65 +137,277 @@ def fix_url(url):
 
   return url
 
+################# DEFINETALLY USED##############################
+
+def client():
+  return pymongo.MongoClient(os.environ.get('DATABASE'))
+
+def get_mongo_collection(collection_name):
+  database = client()["SAM2"]
+  collection = database[collection_name]
+
+  return collection
+
+def get_root_item(root):
+  root_collection = get_mongo_collection('root')
+  query = { "root": root}
+  root_item = root_collection.find_one(query)
+
+  return root_item
+
+################################################################
+
+class Level2Spider(scrapy.Spider):
+  name = "level2"
+
+  def start_requests(self):
+    start_urls = read_sites_file()[0:1]
+    level_2_collection = get_mongo_collection('level_2')
+
+    for start_url in start_urls:
+      self.root = get_root_item(start_url)
+      query = { "root": start_url}
+      self.level_2 = {str(x['_id']): x for x in level_2_collection.find(query)}
+      keys = list(self.level_2.keys())
+      for key in keys:
+
+        try:
+          yield scrapy.Request(url=fix_url(self.level_2[key]['url']),
+            callback=self.parse,
+            errback=self.errbacktest,
+            meta={
+              'root': self.level_2[key]['root'],
+              '_id': str(key)
+            })
+
+        except Exception as e:
+          pass
+
+  def parse(self, response):
+    try:
+      result = response.text
+
+    except AttributeError as e:
+      result = ''
+
+    except Exception as e:
+      result = ''
+
+    self.level_2[response.meta.get('_id')]["body"] = result
+
+  def errbacktest(self, failiure):
+    pass
+
+  @classmethod
+  def from_crawler(cls, crawler, *args, **kwargs):
+    spider = super().from_crawler(crawler, *args, **kwargs)
+    crawler.signals.connect(spider.spider_closed, signal=signals.spider_closed)
+    return spider
+
+  def spider_closed(self, spider):
+    level_2_collection = get_mongo_collection('level_2')
+    bulk = level_2_collection.initialize_ordered_bulk_op()
+    for _id, level in self.level_2.items():
+      bulk.find({'_id': ObjectId(_id)}).update({'$set': {
+        "body": level.get("body", '')}})
+
+    bulk.execute()
+
 class Level1Spider(scrapy.Spider):
   name = "level1"
   results = []
 
+  def update_root(self, root_item):
+    root_collection = get_mongo_collection('root')
+    query = { "_id": ObjectId(root_item["_id"])}
+    update = { "$set": { "subsubpages": root_item["subpages"], "body": root_item["body"] } }
+
+    root_collection.update_one(query, update)
+
+  def get_level_1_item(self, _id):
+    level_1_collection = get_mongo_collection('level_1')
+    query = { "_id": ObjectId(_id)}
+    level_1_item = level_1_collection.find_one(query)
+
+    return level_1_item
+
+  def save_level_2(self, new_urls):
+    level_2_collection = get_mongo_collection('level_2')
+    new_ids = level_2_collection.insert_many(new_urls).inserted_ids
+
+    return new_ids
+
+  '''
+  def update_level_1(self, level_1_item):
+    level_1_collection = get_mongo_collection('level_1')
+    query = { "_id": ObjectId(level_1_item["_id"])}
+    update = { "$set": { "subpages": level_1_item["subpages"], "body": level_1_item["body"] } }
+
+    level_1_collection.update_one(query, update)
+  '''
+
   def start_requests(self):
-    start_urls = read_sites_file()
-    url_chunks = [query_links(url, 'root') for url in start_urls]
+    start_urls = read_sites_file()[0:1]
+    url_chunks = [{'root': url, 'urls': query_links(url, 'root')} for url in start_urls]
+
+    level_1_collection = get_mongo_collection('level_1')
 
     for chunk in url_chunks:
-      for url in chunk:
-        yield scrapy.Request(url=fix_url(url), callback=self.parse, errback=self.errbacktest, meta={'root': url})
 
-      save_many(self.results, 'level_1')
-      self.results = []
+      # query the root item
+      self.root = get_root_item(chunk['root'])
 
+      # query the level 1 item
+      query = { "root": chunk['root']}
+      self.level_1 = {str(x['_id']): x for x in level_1_collection.find(query)}
+
+      for url in chunk['urls']:
+        try:
+          yield scrapy.Request(url=fix_url(url['url']),
+            callback=self.parse,
+            errback=self.errbacktest,
+            meta={'root': chunk['root'], '_id': str(url['_id'])})
+
+        except Exception as e:
+          pass
 
   def parse(self, response):
-    result = parser(response)
-    self.results.append(result)
+    urls = response.xpath('//a[@href]/@href').extract()
+    urls = list(set(urls))
+    urls = [filter_conditions(x, response.meta.get('root')) for x in urls]
+    urls = [x for x in urls if x is not None]
+    urls = list(set(urls) - set([x["url"] for x in self.level_1[response.meta.get('_id')]["subpages"]]))
+    urls = list(set(urls) - set([x["url"] for x in self.root["subpages"]]))
+    urls = list(set(urls) - set([x["url"] for x in self.root["subsubpages"]]))
+
+    ids = []
+    if len(urls) > 0:
+      level_2_items = []
+      for url in urls:
+        level_2_item = {}
+        level_2_item["root"] = response.meta.get('root')
+        level_2_item["url"] = url
+        level_2_item["parent"] = self.level_1[response.meta.get('_id')]['url']
+        level_2_item["body"] = ''
+
+
+        level_2_items.append(level_2_item)
+
+      # save the subpages, and store the ids
+      ids = self.save_level_2(level_2_items)
+
+    # subpages will be added to the level_1 item
+    subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
+    self.level_1[response.meta.get('_id')]["subpages"].extend(subpages)
+    self.level_1[response.meta.get('_id')]["body"] = response.text
+
+    # subpages will also be added to the root item as subsubpages
+    self.root["subsubpages"].extend(subpages)
 
   def errbacktest(self, failiure):
-    response = failiure.value.response
-    url = response.request.url
+    print('fail')
+    pass
 
-    result = {}
-    result['url'] = url
-    result['subpages'] = []
-    result['root'] = response.meta.get('root')
-    result['html'] = ''
-    result['status'] = response.status
+  @classmethod
+  def from_crawler(cls, crawler, *args, **kwargs):
+    spider = super().from_crawler(crawler, *args, **kwargs)
+    crawler.signals.connect(spider.spider_closed, signal=signals.spider_closed)
+    return spider
 
-    self.results.append(result)
+  def spider_closed(self, spider):
+    level_1_collection = get_mongo_collection('level_1')
+    bulk = level_1_collection.initialize_ordered_bulk_op()
+    for _id, level in self.level_1.items():
+      bulk.find({'_id': ObjectId(_id)}).update({'$set': {
+        "subpages": level.get("subpages", []),
+        "body": level.get("body", '')}})
+
+    bulk.execute()
+    self.update_root(self.root)
 
 
 class RootSpider(scrapy.Spider):
   name = "root"
 
+  def save_root_basic(self, root_item):
+    root_collection = get_mongo_collection('root')
+    root_collection.insert_one(root_item)
+
+    return root_item
+
+  def save_level_1(self, new_urls):
+    level_1_collection = get_mongo_collection('level_1')
+    new_ids = level_1_collection.insert_many(new_urls).inserted_ids
+
+    return new_ids
+
+  def update_root(self, root_item):
+    root_collection = get_mongo_collection('root')
+    query = { "_id": ObjectId(root_item["_id"])}
+    update = { "$set": { "subpages": root_item["subpages"], "body": root_item["body"] } }
+
+    root_collection.update_one(query, update)
+
   def start_requests(self):
-    start_urls = read_sites_file()
+    start_urls = read_sites_file()[0:1]
 
     for url in start_urls:
-      yield scrapy.Request(url=fix_url(url), callback=self.parse, errback=self.errbacktest, meta={'root': url})
+      yield scrapy.Request(url=fix_url(url), callback=self.parser, errback=self.errbacktest, meta={'root': url})
 
-  def parse(self, response):
-    result = parser(response)
-    save_single(result, 'root')
+
+  def parser(self, response):
+    urls = response.xpath('//a[@href]/@href').extract()
+    urls = list(set(urls))
+    urls = [filter_conditions(x, response.meta.get('root')) for x in urls]
+    urls = [x for x in urls if x is not None]
+
+
+    # check if root exists in collection
+    root_item = get_root_item(response.meta.get('root'))
+    # if not, save basic root
+    if root_item == None:
+      root_item = {}
+      root_item["root"] = response.meta.get('root')
+      root_item["url"] = response.url
+      root_item["subpages"] = []
+      root_item["subsubpages"] = []
+      root_item = self.save_root_basic(root_item)
+
+
+    # iterate urls and save children as url + root
+    urls = list(set(urls) - set([x["url"] for x in root_item["subpages"]]))
+    level_1_items = []
+    for url in urls:
+      level_1_item = {}
+      level_1_item["root"] = response.meta.get('root')
+      level_1_item["url"] = url
+      level_1_item["subpages"] = []
+      level_1_item["body"] = ''
+
+      level_1_items.append(level_1_item)
+
+    # save the subpages, and store the ids
+    ids = self.save_level_1(level_1_items)
+
+    # subpages will be added to the root item
+    subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
+    root_item["subpages"].extend(subpages)
+    root_item["body"] = response.text
+
+    # mark child urls with db ids and parent
+    #
+    # update the root with the new subpage list
+    self.update_root(root_item)
+
 
   def errbacktest(self, failiure):
-    response = failiure.value.response
-    url = response.request.url
-
-    result = {}
-    result['url'] = url
-    result['subpages'] = []
-    result['root'] = response.meta.get('root')
-    result['html'] = ''
-    result['status'] = response.status
-
-    save_single(result, 'root')
+    pass
 
 if __name__ == "__main__":
-  pprint(query_links('ru.is', 'root'))
+  pass
+  '''
+  pprint(query_links('visir.is', 'root'))
+
+  collection = get_mongo_collection('root')
+  collection.drop()
+  '''

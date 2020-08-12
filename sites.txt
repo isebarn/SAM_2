@@ -1,4 +1,3 @@
-visir.is
 mbl.is
 geeksforgeeks.org
 hi.is
