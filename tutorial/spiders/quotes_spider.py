@@ -6,6 +6,10 @@ import re
 import os
 from time import time
 from scrapy import signals
+from bs4 import BeautifulSoup
+from difflib import HtmlDiff
+import textwrap
+
 
 levels = ['root', 'level_1', 'level_2', 'level_3']
 
@@ -100,11 +104,12 @@ def query_links(url, collection_name):
     return mydoc['subpages']
 
   else:
-    result = []
     myquery = { "root": url }
     mydoc = collection.find(myquery)
 
     return [x['subpages'] for x in mydoc if len(x['subpages']) > 0]
+
+
 
 def parser(response):
   url = response.request.url
@@ -154,6 +159,28 @@ def get_root_item(root):
   root_item = root_collection.find_one(query)
 
   return root_item
+
+def save_version(version_item):
+  version_collection = get_mongo_collection('version')
+  version_collection.insert_one(version_item)
+
+  return version_item
+
+def compare_html(original, new):
+  soupA = [y.replace('\\n', '') for y in BeautifulSoup(original, features='lxml').stripped_strings if y != '\\n']
+  soupB = [y.replace('\\n', '') for y in BeautifulSoup(new, features='lxml').stripped_strings if y != '\\n']
+
+  c = HtmlDiff(wrapcolumn=50)
+  diff_table = c.make_file(soupA, soupB, context=True)
+
+  return diff_table
+
+def get_version_number(_id):
+  collection = get_mongo_collection('version')
+  query = { "page_id":  _id}
+  version_documents = collection.find(query)
+  return len(list(version_documents)) + 1
+
 
 ################################################################
 
@@ -349,7 +376,7 @@ class RootSpider(scrapy.Spider):
     root_collection.update_one(query, update)
 
   def start_requests(self):
-    start_urls = read_sites_file()[0:1]
+    start_urls = read_sites_file()
 
     for url in start_urls:
       yield scrapy.Request(url=fix_url(url), callback=self.parser, errback=self.errbacktest, meta={'root': url})
@@ -371,9 +398,23 @@ class RootSpider(scrapy.Spider):
       root_item["url"] = response.url
       root_item["subpages"] = []
       root_item["subsubpages"] = []
+      root_item["body"] = response.text
       root_item = self.save_root_basic(root_item)
 
+    else:
+      version_item = {}
+      version_item["page_id"] = root_item["_id"]
+      version_item["body"] = response.text
+      version_item["diff"] = "No difference"
 
+      if root_item['body'] is not response.text:
+        version_item['diff'] = compare_html(root_item['body'], response.text)
+
+      version_item['version_no'] = get_version_number(root_item["_id"])
+
+      save_version(version_item)
+
+    '''
     # iterate urls and save children as url + root
     urls = list(set(urls) - set([x["url"] for x in root_item["subpages"]]))
     level_1_items = []
@@ -392,18 +433,20 @@ class RootSpider(scrapy.Spider):
     # subpages will be added to the root item
     subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
     root_item["subpages"].extend(subpages)
-    root_item["body"] = response.text
 
     # mark child urls with db ids and parent
     #
     # update the root with the new subpage list
     self.update_root(root_item)
+    '''
 
 
   def errbacktest(self, failiure):
     pass
 
 if __name__ == "__main__":
+
+
   pass
   '''
   pprint(query_links('visir.is', 'root'))

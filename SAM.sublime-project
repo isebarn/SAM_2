@@ -11,7 +11,7 @@
     {
       "env":
       {
-        "DATABASE": "mongodb://root:example@192.168.1.35:27017/",
+        "DATABASE": "mongodb://root:example@192.168.1.42:27017/",
       }
     }
   },
