@@ -161,6 +161,8 @@ def get_root_item(root):
   return root_item
 
 def save_version(version_item):
+  if len(list(re.finditer('&nbsp;No Differences Found&nbsp;</td><td class="diff_next"><a href="#difflib_chg_to0__top">t</a></td><td></td><td>&nbsp;No Differences Found&nbsp;', version_item['diff']))) == 1: return
+
   version_collection = get_mongo_collection('version')
   version_collection.insert_one(version_item)
 
@@ -171,7 +173,7 @@ def compare_html(original, new):
   soupB = [y.replace('\\n', '') for y in BeautifulSoup(new, features='lxml').stripped_strings if y != '\\n']
 
   c = HtmlDiff(wrapcolumn=50)
-  diff_table = c.make_file(soupA, soupB, context=True)
+  diff_table = c.make_file(soupA, soupB, context=True).replace('\n', ' ')
 
   return diff_table
 
@@ -188,7 +190,7 @@ class Level2Spider(scrapy.Spider):
   name = "level2"
 
   def start_requests(self):
-    start_urls = read_sites_file()[0:1]
+    start_urls = read_sites_file()
     level_2_collection = get_mongo_collection('level_2')
 
     for start_url in start_urls:
@@ -220,7 +222,18 @@ class Level2Spider(scrapy.Spider):
     except Exception as e:
       result = ''
 
-    self.level_2[response.meta.get('_id')]["body"] = result
+    # if this is the first time this level_2 page was requested
+    if self.level_2[response.meta.get('_id')]["body"] == '':
+      self.level_2[response.meta.get('_id')]["body"] = result
+
+    # not the first time this level_2 page was requested
+    elif self.level_2[response.meta.get('_id')]["body"] != result:
+      version_item = {}
+      version_item["page_id"] = self.level_2[response.meta.get('_id')]["_id"]
+      version_item["body"] = result
+      version_item['diff'] = compare_html(self.level_2[response.meta.get('_id')]["body"], result)
+      version_item['version_no'] = get_version_number(self.level_2[response.meta.get('_id')]["_id"])
+      save_version(version_item)
 
   def errbacktest(self, failiure):
     pass
@@ -264,17 +277,8 @@ class Level1Spider(scrapy.Spider):
 
     return new_ids
 
-  '''
-  def update_level_1(self, level_1_item):
-    level_1_collection = get_mongo_collection('level_1')
-    query = { "_id": ObjectId(level_1_item["_id"])}
-    update = { "$set": { "subpages": level_1_item["subpages"], "body": level_1_item["body"] } }
-
-    level_1_collection.update_one(query, update)
-  '''
-
   def start_requests(self):
-    start_urls = read_sites_file()[0:1]
+    start_urls = read_sites_file()
     url_chunks = [{'root': url, 'urls': query_links(url, 'root')} for url in start_urls]
 
     level_1_collection = get_mongo_collection('level_1')
@@ -326,7 +330,19 @@ class Level1Spider(scrapy.Spider):
     # subpages will be added to the level_1 item
     subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
     self.level_1[response.meta.get('_id')]["subpages"].extend(subpages)
-    self.level_1[response.meta.get('_id')]["body"] = response.text
+
+    # if this is the first time this level_1 page was requested
+    if self.level_1[response.meta.get('_id')]["body"] == '':
+      self.level_1[response.meta.get('_id')]["body"] = response.text
+
+    # not the first time this level_1 page was requested
+    elif self.level_1[response.meta.get('_id')]["body"] != response.text:
+      version_item = {}
+      version_item["page_id"] = self.level_1[response.meta.get('_id')]["_id"]
+      version_item["body"] = response.text
+      version_item['diff'] = compare_html(self.level_1[response.meta.get('_id')]["body"], response.text)
+      version_item['version_no'] = get_version_number(self.level_1[response.meta.get('_id')]["_id"])
+      save_version(version_item)
 
     # subpages will also be added to the root item as subsubpages
     self.root["subsubpages"].extend(subpages)
@@ -401,17 +417,13 @@ class RootSpider(scrapy.Spider):
       root_item["body"] = response.text
       root_item = self.save_root_basic(root_item)
 
-    else:
+    # if new version, save version item
+    elif root_item['body'] != response.text:
       version_item = {}
       version_item["page_id"] = root_item["_id"]
       version_item["body"] = response.text
-      version_item["diff"] = "No difference"
-
-      if root_item['body'] is not response.text:
-        version_item['diff'] = compare_html(root_item['body'], response.text)
-
+      version_item['diff'] = compare_html(root_item['body'], response.text)
       version_item['version_no'] = get_version_number(root_item["_id"])
-
       save_version(version_item)
 
     # iterate urls and save children as url + root
@@ -423,7 +435,6 @@ class RootSpider(scrapy.Spider):
       level_1_item["url"] = url
       level_1_item["subpages"] = []
       level_1_item["body"] = ''
-
       level_1_items.append(level_1_item)
 
     # save the subpages, and store the ids
@@ -443,7 +454,6 @@ class RootSpider(scrapy.Spider):
     pass
 
 if __name__ == "__main__":
-
 
   pass
   '''
