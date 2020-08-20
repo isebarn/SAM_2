@@ -414,7 +414,6 @@ class RootSpider(scrapy.Spider):
 
       save_version(version_item)
 
-    '''
     # iterate urls and save children as url + root
     urls = list(set(urls) - set([x["url"] for x in root_item["subpages"]]))
     level_1_items = []
@@ -438,7 +437,6 @@ class RootSpider(scrapy.Spider):
     #
     # update the root with the new subpage list
     self.update_root(root_item)
-    '''
 
 
   def errbacktest(self, failiure):
