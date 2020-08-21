@@ -251,7 +251,8 @@ class Level2Spider(scrapy.Spider):
       bulk.find({'_id': ObjectId(_id)}).update({'$set': {
         "body": level.get("body", '')}})
 
-    bulk.execute()
+    if len(self.level_2.items()) > 0:
+      bulk.execute()
 
 class Level1Spider(scrapy.Spider):
   name = "level1"
@@ -272,6 +273,8 @@ class Level1Spider(scrapy.Spider):
     return level_1_item
 
   def save_level_2(self, new_urls):
+    if len(new_urls) == 0: return None
+
     level_2_collection = get_mongo_collection('level_2')
     new_ids = level_2_collection.insert_many(new_urls).inserted_ids
 
@@ -328,8 +331,9 @@ class Level1Spider(scrapy.Spider):
       ids = self.save_level_2(level_2_items)
 
     # subpages will be added to the level_1 item
-    subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
-    self.level_1[response.meta.get('_id')]["subpages"].extend(subpages)
+    if ids != None:
+      subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
+      self.level_1[response.meta.get('_id')]["subpages"].extend(subpages)
 
     # if this is the first time this level_1 page was requested
     if self.level_1[response.meta.get('_id')]["body"] == '':
@@ -365,7 +369,9 @@ class Level1Spider(scrapy.Spider):
         "subpages": level.get("subpages", []),
         "body": level.get("body", '')}})
 
-    bulk.execute()
+    if len(self.level_1.items()) > 0:
+      bulk.execute()
+
     self.update_root(self.root)
 
 
@@ -379,6 +385,8 @@ class RootSpider(scrapy.Spider):
     return root_item
 
   def save_level_1(self, new_urls):
+    if len(new_urls) == 0: return None
+
     level_1_collection = get_mongo_collection('level_1')
     new_ids = level_1_collection.insert_many(new_urls).inserted_ids
 
@@ -441,8 +449,9 @@ class RootSpider(scrapy.Spider):
     ids = self.save_level_1(level_1_items)
 
     # subpages will be added to the root item
-    subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
-    root_item["subpages"].extend(subpages)
+    if ids != None:
+      subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
+      root_item["subpages"].extend(subpages)
 
     # mark child urls with db ids and parent
     #
