@@ -10,7 +10,6 @@ from bs4 import BeautifulSoup
 from difflib import HtmlDiff
 import textwrap
 
-
 levels = ['root', 'level_1', 'level_2', 'level_3']
 
 # remove_prefix('House123', 'House') returns 123
@@ -161,8 +160,6 @@ def get_root_item(root):
   return root_item
 
 def save_version(version_item):
-  if len(list(re.finditer('&nbsp;No Differences Found&nbsp;</td><td class="diff_next"><a href="#difflib_chg_to0__top">t</a></td><td></td><td>&nbsp;No Differences Found&nbsp;', version_item['diff']))) == 1: return
-
   version_collection = get_mongo_collection('version')
   version_collection.insert_one(version_item)
 
@@ -463,7 +460,6 @@ class RootSpider(scrapy.Spider):
     pass
 
 if __name__ == "__main__":
-
   pass
   '''
   pprint(query_links('visir.is', 'root'))
