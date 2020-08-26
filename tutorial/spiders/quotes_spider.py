@@ -159,9 +159,13 @@ def get_root_item(root):
 
   return root_item
 
-def save_version(version_item):
-  version_collection = get_mongo_collection('version')
-  version_collection.insert_one(version_item)
+def save_version(version_item, version):
+  collection = get_mongo_collection(version)
+  query = { "page_id": ObjectId(version_item['page_id']), "resolved": False}
+
+  if collection.find(query).count() == 0:
+    version_collection = get_mongo_collection(version)
+    version_collection.insert_one(version_item)
 
   return version_item
 
@@ -195,6 +199,14 @@ class Level2Spider(scrapy.Spider):
       query = { "root": start_url}
       self.level_2 = {str(x['_id']): x for x in level_2_collection.find(query)}
       keys = list(self.level_2.keys())
+
+      # remove unresolved from the set of keys we scrape
+      unresolved = get_unresolved_pages_levels([ObjectId(key) for key in keys], 'version_level_2')
+      for x in unresolved:
+        self.level_2.pop(str(x))
+
+      keys = list(self.level_2.keys())
+
       for key in keys:
 
         try:
@@ -230,7 +242,8 @@ class Level2Spider(scrapy.Spider):
       version_item["body"] = result
       version_item['diff'] = compare_html(self.level_2[response.meta.get('_id')]["body"], result)
       version_item['version_no'] = get_version_number(self.level_2[response.meta.get('_id')]["_id"])
-      save_version(version_item)
+      version_item['resolved'] = False
+      save_version(version_item, 'version_level_2')
 
   def errbacktest(self, failiure):
     pass
@@ -285,6 +298,11 @@ class Level1Spider(scrapy.Spider):
 
     for chunk in url_chunks:
 
+      # get a list of urls that do NOT have unresolved versions
+      ids = [x['_id'] for x in chunk['urls']]
+      unresolved = get_unresolved_pages_levels(ids, 'version_level_1')
+      urls = [url for url in chunk['urls'] if url['_id'] not in unresolved]
+
       # query the root item
       self.root = get_root_item(chunk['root'])
 
@@ -292,7 +310,7 @@ class Level1Spider(scrapy.Spider):
       query = { "root": chunk['root']}
       self.level_1 = {str(x['_id']): x for x in level_1_collection.find(query)}
 
-      for url in chunk['urls']:
+      for url in urls:
         try:
           yield scrapy.Request(url=fix_url(url['url']),
             callback=self.parse,
@@ -314,7 +332,7 @@ class Level1Spider(scrapy.Spider):
     ids = []
     if len(urls) > 0:
       level_2_items = []
-      for url in urls:
+      for url in urls[0:5]:
         level_2_item = {}
         level_2_item["root"] = response.meta.get('root')
         level_2_item["url"] = url
@@ -343,7 +361,8 @@ class Level1Spider(scrapy.Spider):
       version_item["body"] = response.text
       version_item['diff'] = compare_html(self.level_1[response.meta.get('_id')]["body"], response.text)
       version_item['version_no'] = get_version_number(self.level_1[response.meta.get('_id')]["_id"])
-      save_version(version_item)
+      version_item['resolved'] = False
+      save_version(version_item, 'version_level_1')
 
     # subpages will also be added to the root item as subsubpages
     self.root["subsubpages"].extend(subpages)
@@ -398,9 +417,11 @@ class RootSpider(scrapy.Spider):
 
   def start_requests(self):
     start_urls = read_sites_file()
-
+    unresolved_pages = get_unresolved_pages('root', start_urls)
     for url in start_urls:
-      yield scrapy.Request(url=fix_url(url), callback=self.parser, errback=self.errbacktest, meta={'root': url})
+      root_item = get_root_item(url)
+      if root_item == None or root_item['_id'] not in unresolved_pages:
+        yield scrapy.Request(url=fix_url(url), callback=self.parser, errback=self.errbacktest, meta={'root': url})
 
 
   def parser(self, response):
@@ -429,12 +450,13 @@ class RootSpider(scrapy.Spider):
       version_item["body"] = response.text
       version_item['diff'] = compare_html(root_item['body'], response.text)
       version_item['version_no'] = get_version_number(root_item["_id"])
-      save_version(version_item)
+      version_item['resolved'] = False
+      save_version(version_item, 'version_root')
 
     # iterate urls and save children as url + root
     urls = list(set(urls) - set([x["url"] for x in root_item["subpages"]]))
     level_1_items = []
-    for url in urls:
+    for url in urls[0:1]:
       level_1_item = {}
       level_1_item["root"] = response.meta.get('root')
       level_1_item["url"] = url
@@ -459,11 +481,38 @@ class RootSpider(scrapy.Spider):
   def errbacktest(self, failiure):
     pass
 
-if __name__ == "__main__":
-  pass
-  '''
-  pprint(query_links('visir.is', 'root'))
 
-  collection = get_mongo_collection('root')
-  collection.drop()
-  '''
+def get_unresolved_pages(collection_name, urls):
+  collection = get_mongo_collection(collection_name)
+  items = [item for item in collection.find({"root": {"$in": urls}})]
+  ids = [item["_id"] for item in items]
+
+  version_collection = get_mongo_collection("version_{}".format(collection_name))
+  return [x['page_id'] for x in version_collection.find({"page_id": {"$in": ids}, 'resolved': False})]
+
+def get_unresolved_pages_levels(page_ids, version):
+  collection = get_mongo_collection(version)
+  unresolved = collection.find({"page_id": {"$in": page_ids}, 'resolved': False})
+  return [x['page_id'] for x in unresolved]
+
+
+if __name__ == "__main__":
+  #level_1 = [ObjectId('5f466f29458b31d94e15285a'), ObjectId('5f466f29458b31d94e15285b'), ObjectId('5f466f29458b31d94e15285c'), ObjectId('5f466f29458b31d94e15285d'), ObjectId('5f466f29458b31d94e15285e')]
+
+
+  #pprint(get_unresolved_pages_levels(level_1, 'version_level_1'))
+  #print(get_unresolved_pages('root', ['mbl.is']))
+  #print(get_root_item('mbl.is') == None)
+  root_collection = get_mongo_collection('level_2')
+  query = { "root": 'mbl.is' }
+  root_item = root_collection.find_one(query)
+
+  version_collection = get_mongo_collection('version_level_2')
+  query = { "page_id": ObjectId('5f467e6ea7976e0d9a1b1c92'), 'resolved': False}
+  version_item = version_collection.find_one(query)
+
+  query = { "_id": ObjectId(version_item["_id"])}
+  update = { "$set": { "resolved": True } }
+
+  version_collection.update_one(query, update)
+  
