@@ -332,7 +332,7 @@ class Level1Spider(scrapy.Spider):
     ids = []
     if len(urls) > 0:
       level_2_items = []
-      for url in urls[0:5]:
+      for url in urls:
         level_2_item = {}
         level_2_item["root"] = response.meta.get('root')
         level_2_item["url"] = url
@@ -456,7 +456,7 @@ class RootSpider(scrapy.Spider):
     # iterate urls and save children as url + root
     urls = list(set(urls) - set([x["url"] for x in root_item["subpages"]]))
     level_1_items = []
-    for url in urls[0:1]:
+    for url in urls:
       level_1_item = {}
       level_1_item["root"] = response.meta.get('root')
       level_1_item["url"] = url
@@ -497,22 +497,4 @@ def get_unresolved_pages_levels(page_ids, version):
 
 
 if __name__ == "__main__":
-  #level_1 = [ObjectId('5f466f29458b31d94e15285a'), ObjectId('5f466f29458b31d94e15285b'), ObjectId('5f466f29458b31d94e15285c'), ObjectId('5f466f29458b31d94e15285d'), ObjectId('5f466f29458b31d94e15285e')]
-
-
-  #pprint(get_unresolved_pages_levels(level_1, 'version_level_1'))
-  #print(get_unresolved_pages('root', ['mbl.is']))
-  #print(get_root_item('mbl.is') == None)
-  root_collection = get_mongo_collection('level_2')
-  query = { "root": 'mbl.is' }
-  root_item = root_collection.find_one(query)
-
-  version_collection = get_mongo_collection('version_level_2')
-  query = { "page_id": ObjectId('5f467e6ea7976e0d9a1b1c92'), 'resolved': False}
-  version_item = version_collection.find_one(query)
-
-  query = { "_id": ObjectId(version_item["_id"])}
-  update = { "$set": { "resolved": True } }
-
-  version_collection.update_one(query, update)
-  
+  pass
