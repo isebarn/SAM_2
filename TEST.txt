@@ -1,0 +1,21 @@
+TEST
+
+Scrape root - 1 entry in root collection
+Scrape root - 1 entry in version collection
+Scrape root - 1 entry in version collection
+Mark root entry as resolved
+Scrape root - 2 entry in version collection
+
+
+Scrape level_1 - 5 entry in level_1 collection
+Scrape level_1 - X_1 entry in version collection
+Scrape level_1 - X_1 + N entry in version collection
+Mark level_1 entry as resolved
+Scrape level_1 - X1_ + N + M = X_2 entry in version collection
+
+
+Scrape level_2 - 5 entry in level_2 collection
+Scrape level_2 - X_1 entry in version collection
+Scrape level_2 - X_1 + N entry in version collection
+Mark level_2 entry as resolved
+Scrape level_2 - X1_ + N + M = X_2 entry in version collection
