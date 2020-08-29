@@ -9,6 +9,8 @@ from scrapy import signals
 from bs4 import BeautifulSoup
 from difflib import HtmlDiff
 import textwrap
+from urllib.parse import urlparse, urlsplit
+
 
 levels = ['root', 'level_1', 'level_2', 'level_3']
 
@@ -39,10 +41,6 @@ def item_is_pdf_link(item):
 def item_is_email_link(item):
   return 'mailto' in item
 
-# item_is_subdirectory(/p/monday) return true
-def item_is_subdirectory(item):
-  return item.startswith('/')
-
 def starts_with_subdomain(url, parent_url):
   try:
     subdomain = re.search(r'([a-z0-9]+[.])*{}'.format(parent_url), url)
@@ -53,8 +51,24 @@ def starts_with_subdomain(url, parent_url):
 
   return subdomain != None and subdomain.group(1) != None
 
+def item_is_outside_domain(item, parent_url):
+  if '://' not in item: return False
+
+  item_domain = urlsplit(item).netloc.split('.')[-2]
+
+  parent = parent_url
+  if '://' in parent:
+    parent = urlsplit(parent).netloc
+  parent_url_domain = parent.split('.')[-2]
+
+  return item_domain is not None and item_domain != parent_url_domain
+
 def filter_conditions(item, parent_url):
-  if item_is_empty(item) or item_is_pdf_link(item) or item_is_email_link(item):
+  if 'javascript:popup' in item \
+    or item_is_empty(item) \
+    or item_is_pdf_link(item) \
+    or item_is_email_link(item) \
+    or item_is_outside_domain(item, parent_url):
     return None
 
   # Check if the parent_url appears in the item
@@ -69,10 +83,7 @@ def filter_conditions(item, parent_url):
     if starts_with_subdomain(url, parent_url):
       return item
 
-  # check if item is a subdirectory link
-  if item_is_subdirectory(item):
-    return "{}{}".format(parent_url, item)
-  return None
+  return "{}{}{}".format(parent_url, '' if item.startswith('/') else '/', item)
 
 
 def save_single(data, collection_name):
