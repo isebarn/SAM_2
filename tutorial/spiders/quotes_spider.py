@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from difflib import HtmlDiff
 import textwrap
 from urllib.parse import urlparse, urlsplit
-
+from datetime import datetime
 
 levels = ['root', 'level_1', 'level_2', 'level_3']
 
@@ -245,6 +245,7 @@ class Level2Spider(scrapy.Spider):
     # if this is the first time this level_2 page was requested
     if self.level_2[response.meta.get('_id')]["body"] == '':
       self.level_2[response.meta.get('_id')]["body"] = result
+      self.level_2[response.meta.get('_id')]["time"] = datetime.now()
 
     # not the first time this level_2 page was requested
     elif self.level_2[response.meta.get('_id')]["body"] != result:
@@ -254,6 +255,7 @@ class Level2Spider(scrapy.Spider):
       version_item['diff'] = compare_html(self.level_2[response.meta.get('_id')]["body"], result)
       version_item['version_no'] = get_version_number(self.level_2[response.meta.get('_id')]["_id"])
       version_item['resolved'] = False
+      version_item['time'] = datetime.now()
       save_version(version_item, 'version_level_2')
 
   def errbacktest(self, failiure):
@@ -270,7 +272,8 @@ class Level2Spider(scrapy.Spider):
     bulk = level_2_collection.initialize_ordered_bulk_op()
     for _id, level in self.level_2.items():
       bulk.find({'_id': ObjectId(_id)}).update({'$set': {
-        "body": level.get("body", '')}})
+        "body": level.get("body", ''),
+        "time": level.get("time", '')}})
 
     if len(self.level_2.items()) > 0:
       bulk.execute()
@@ -358,12 +361,13 @@ class Level1Spider(scrapy.Spider):
 
     # subpages will be added to the level_1 item
     if ids != None:
-      subpages = [{'_id': _id, 'url': url} for _id, url in zip(ids, urls)]
+      subpages = [{'_id': _id, 'url': url.split("://www.")[-1].split("://")[-1]} for _id, url in zip(ids, urls)]
       self.level_1[response.meta.get('_id')]["subpages"].extend(subpages)
 
     # if this is the first time this level_1 page was requested
     if self.level_1[response.meta.get('_id')]["body"] == '':
       self.level_1[response.meta.get('_id')]["body"] = response.text
+      self.level_1[response.meta.get('_id')]["time"] = datetime.now()
 
     # not the first time this level_1 page was requested
     elif self.level_1[response.meta.get('_id')]["body"] != response.text:
@@ -373,6 +377,7 @@ class Level1Spider(scrapy.Spider):
       version_item['diff'] = compare_html(self.level_1[response.meta.get('_id')]["body"], response.text)
       version_item['version_no'] = get_version_number(self.level_1[response.meta.get('_id')]["_id"])
       version_item['resolved'] = False
+      version_item['time'] = datetime.now()
       save_version(version_item, 'version_level_1')
 
     # subpages will also be added to the root item as subsubpages
@@ -394,6 +399,7 @@ class Level1Spider(scrapy.Spider):
     for _id, level in self.level_1.items():
       bulk.find({'_id': ObjectId(_id)}).update({'$set': {
         "subpages": level.get("subpages", []),
+        "time": level.get("time", []),
         "body": level.get("body", '')}})
 
     if len(self.level_1.items()) > 0:
@@ -434,7 +440,6 @@ class RootSpider(scrapy.Spider):
       if root_item == None or root_item['_id'] not in unresolved_pages:
         yield scrapy.Request(url=fix_url(url), callback=self.parser, errback=self.errbacktest, meta={'root': url})
 
-
   def parser(self, response):
     urls = response.xpath('//a[@href]/@href').extract()
     urls = list(set(urls))
@@ -448,10 +453,11 @@ class RootSpider(scrapy.Spider):
     if root_item == None:
       root_item = {}
       root_item["root"] = response.meta.get('root')
-      root_item["url"] = response.url
+      root_item["url"] = response.url.split("://www.")[-1].split("://")[-1]
       root_item["subpages"] = []
       root_item["subsubpages"] = []
       root_item["body"] = response.text
+      root_item['time'] = datetime.now()
       root_item = self.save_root_basic(root_item)
 
     # if new version, save version item
@@ -462,6 +468,7 @@ class RootSpider(scrapy.Spider):
       version_item['diff'] = compare_html(root_item['body'], response.text)
       version_item['version_no'] = get_version_number(root_item["_id"])
       version_item['resolved'] = False
+      version_item['time'] = datetime.now()
       save_version(version_item, 'version_root')
 
     # iterate urls and save children as url + root
@@ -470,7 +477,7 @@ class RootSpider(scrapy.Spider):
     for url in urls:
       level_1_item = {}
       level_1_item["root"] = response.meta.get('root')
-      level_1_item["url"] = url
+      level_1_item["url"] = url.split("://www.")[-1].split("://")[-1]
       level_1_item["subpages"] = []
       level_1_item["body"] = ''
       level_1_items.append(level_1_item)
@@ -487,7 +494,6 @@ class RootSpider(scrapy.Spider):
     #
     # update the root with the new subpage list
     self.update_root(root_item)
-
 
   def errbacktest(self, failiure):
     pass
