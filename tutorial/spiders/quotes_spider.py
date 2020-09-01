@@ -51,6 +51,14 @@ def starts_with_subdomain(url, parent_url):
 
   return subdomain != None and subdomain.group(1) != None
 
+def item_is_root(item, parent_url):
+  # remove all prefixes
+  clean_item = item.replace(parent_url, '').replace("www.", "").split("://")[-1].replace('/', '')
+  if clean_item == '':
+    return True
+
+  return False
+
 def item_is_outside_domain(item, parent_url):
   if '://' not in item: return False
 
@@ -68,7 +76,8 @@ def filter_conditions(item, parent_url):
     or item_is_empty(item) \
     or item_is_pdf_link(item) \
     or item_is_email_link(item) \
-    or item_is_outside_domain(item, parent_url):
+    or item_is_outside_domain(item, parent_url) \
+    or item_is_root(item, parent_url):
     return None
 
   # Check if the parent_url appears in the item
