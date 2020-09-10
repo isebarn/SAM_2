@@ -290,6 +290,7 @@ class Level2Spider(scrapy.Spider):
 class Level1Spider(scrapy.Spider):
   name = "level1"
   results = []
+  unique_subpages = []
 
   def update_root(self, root_item):
     root_collection = get_mongo_collection('root')
@@ -351,26 +352,36 @@ class Level1Spider(scrapy.Spider):
     urls = list(set(urls) - set([x["url"] for x in self.level_1[response.meta.get('_id')]["subpages"]]))
     urls = list(set(urls) - set([x["url"] for x in self.root["subpages"]]))
     urls = list(set(urls) - set([x["url"] for x in self.root["subsubpages"]]))
+    urls = list(set(urls) - set(self.unique_subpages))
 
     ids = []
+
+    # necessary for race conditions
+    filtered_urls = []
     if len(urls) > 0:
       level_2_items = []
-      for url in urls:
-        level_2_item = {}
-        level_2_item["root"] = response.meta.get('root')
-        level_2_item["url"] = url
-        level_2_item["parent"] = self.level_1[response.meta.get('_id')]['url']
-        level_2_item["body"] = ''
+      # need a while loop to make sure that no two running threads
+      # scraping the different subpages are collecting the same subsubpage url
+      while len(urls) > 0:
+        url = urls.pop()
+        if url not in self.unique_subpages:
+          self.unique_subpages.append(url)
+          filtered_urls.append(url)
+          level_2_item = {}
+          level_2_item["root"] = response.meta.get('root')
+          level_2_item["url"] = url
+          level_2_item["parent"] = self.level_1[response.meta.get('_id')]['url']
+          level_2_item["body"] = ''
 
 
-        level_2_items.append(level_2_item)
+          level_2_items.append(level_2_item)
 
       # save the subpages, and store the ids
       ids = self.save_level_2(level_2_items)
 
     # subpages will be added to the level_1 item
     if ids != None:
-      subpages = [{'_id': _id, 'url': url.split("://www.")[-1].split("://")[-1]} for _id, url in zip(ids, urls)]
+      subpages = [{'_id': _id, 'url': url.split("://www.")[-1].split("://")[-1]} for _id, url in zip(ids, filtered_urls)]
       self.level_1[response.meta.get('_id')]["subpages"].extend(subpages)
 
     # if this is the first time this level_1 page was requested
